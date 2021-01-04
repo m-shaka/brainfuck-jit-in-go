@@ -9,18 +9,21 @@ import (
 
 const memorySize = 30000
 
-var sc = bufio.NewScanner(os.Stdin)
-
 type program struct {
 	instructions []rune
 }
 
-func parse() program {
+func parse(filename string) program {
 	var insts []rune
 	tokens := "><+-.,[]"
-	for sc.Scan() {
-		line := sc.Text()
-		for _, c := range line {
+	fp, err := os.Open(filename)
+	if err != nil {
+		panic(err)
+	}
+	defer fp.Close()
+	scanner := bufio.NewScanner(fp)
+	for scanner.Scan() {
+		for _, c := range scanner.Text() {
 			if strings.Contains(tokens, string(c)) {
 				insts = append(insts, c)
 			}
@@ -29,10 +32,11 @@ func parse() program {
 	return program{insts}
 }
 
-func interpret(p program) {
+func interpret(p program, jumptable []int) {
 	memory := make([]uint8, memorySize)
 	pc := 0
 	dataptr := 0
+	reader := bufio.NewReader(os.Stdin)
 	for pc < len(p.instructions) {
 		instruction := p.instructions[pc]
 		switch instruction {
@@ -49,49 +53,20 @@ func interpret(p program) {
 			memory[dataptr]--
 			break
 		case ',':
-			if sc.Scan() {
-				memory[dataptr] = sc.Text()[0]
-			}
+			val, _ := reader.ReadByte()
+			memory[dataptr] = uint8(val)
 			break
 		case '.':
 			print(string(memory[dataptr]))
 			break
 		case '[':
 			if memory[dataptr] == 0 {
-				bracketNesting := 1
-				savedPC := pc
-				for bracketNesting > 0 && pc < len(p.instructions) {
-					pc++
-					if p.instructions[pc] == ']' {
-						bracketNesting--
-					} else if p.instructions[pc] == '[' {
-						bracketNesting++
-					}
-				}
-				if bracketNesting <= 0 {
-					break
-				} else {
-					panic(fmt.Sprintf("unmatched '[' at pc=%d", savedPC))
-				}
+				pc = jumptable[pc]
 			}
 			break
 		case ']':
 			if memory[dataptr] != 0 {
-				bracketNesting := 1
-				savedPC := pc
-				for bracketNesting > 0 && pc > 0 {
-					pc--
-					if p.instructions[pc] == '[' {
-						bracketNesting--
-					} else if p.instructions[pc] == ']' {
-						bracketNesting++
-					}
-				}
-				if bracketNesting <= 0 {
-					break
-				} else {
-					panic(fmt.Sprintf("unmatched ']' at pc=%d", savedPC))
-				}
+				pc = jumptable[pc]
 			}
 			break
 		default:
@@ -101,7 +76,37 @@ func interpret(p program) {
 	}
 }
 
+func computeJumptable(p program) []int {
+	pc := 0
+	programSize := len(p.instructions)
+	jumptable := make([]int, programSize)
+	for pc < programSize {
+		instruction := p.instructions[pc]
+		if instruction == '[' {
+			bracketNesting := 1
+			seek := pc
+			for bracketNesting > 0 && seek-2 < programSize {
+				seek++
+				if p.instructions[seek] == ']' {
+					bracketNesting--
+				} else if p.instructions[seek] == '[' {
+					bracketNesting++
+				}
+			}
+			if bracketNesting <= 0 {
+				jumptable[pc] = seek
+				jumptable[seek] = pc
+			} else {
+				panic(fmt.Sprintf("unmatched '[' at pc=%d", pc))
+			}
+		}
+		pc++
+	}
+	return jumptable
+}
+
 func main() {
-	program := parse()
-	interpret(program)
+	program := parse(os.Args[1])
+	jumptable := computeJumptable(program)
+	interpret(program, jumptable)
 }
