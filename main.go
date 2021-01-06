@@ -20,6 +20,9 @@ const (
 	decData
 	readStdin
 	writeStdout
+	loopSetToZero
+	loopMovePtr
+	loopMoveData
 	jumpIfDataZero
 	jumpIfDataNotZero
 )
@@ -47,6 +50,12 @@ func (op *bfOp) toToken() rune {
 		return '['
 	case jumpIfDataNotZero:
 		return ']'
+	case loopSetToZero:
+		return 's'
+	case loopMoveData:
+		return 'm'
+	case loopMovePtr:
+		return 'p'
 	default:
 		panic("invalid op")
 	}
@@ -93,8 +102,13 @@ func translate(p program) []bfOp {
 			if err != nil {
 				panic(fmt.Sprintf("unmatched closing ']' at pc=%d", pc))
 			}
-			ops[offset].argument = len(ops)
-			ops = append(ops, bfOp{jumpIfDataNotZero, offset})
+			optimizedOps := optimizeLoop(ops, offset)
+			if len(optimizedOps) == 0 {
+				ops[offset].argument = len(ops)
+				ops = append(ops, bfOp{jumpIfDataNotZero, offset})
+			} else {
+				ops = append(ops[0:offset], optimizedOps...)
+			}
 			pc++
 			break
 		default:
@@ -133,13 +147,49 @@ func translate(p program) []bfOp {
 	return ops
 }
 
+func optimizeLoop(ops []bfOp, loopStart int) []bfOp {
+	var optimizedOps []bfOp
+	loopSize := len(ops) - loopStart
+	if loopSize == 2 {
+		repeatedOp := ops[loopStart+1]
+		switch repeatedOp.kind {
+		case incData:
+		case decData:
+			optimizedOps = append(optimizedOps, bfOp{loopSetToZero, 0})
+			break
+		case incPtr:
+		case decPtr:
+			arg := repeatedOp.argument
+			if repeatedOp.kind == decPtr {
+				arg = -arg
+			}
+			optimizedOps = append(optimizedOps, bfOp{loopMovePtr, arg})
+		}
+	} else if loopSize == 5 {
+		if ops[loopStart+1].kind == decData &&
+			ops[loopSize+3].kind == incData &&
+			ops[loopStart+1].argument == 1 &&
+			ops[loopStart+3].argument == 1 {
+			if ops[loopStart+2].kind == incPtr &&
+				ops[loopStart+4].kind == decPtr &&
+				ops[loopStart+2].argument == ops[loopStart+4].argument {
+				optimizedOps = append(optimizedOps, bfOp{loopMoveData, ops[loopStart+2].argument})
+			} else if ops[loopStart+2].kind == decPtr &&
+				ops[loopStart+4].kind == incPtr &&
+				ops[loopStart+2].argument == ops[loopStart+4].argument {
+				optimizedOps = append(optimizedOps, bfOp{loopMoveData, -ops[loopStart+2].argument})
+			}
+		}
+	}
+	return optimizedOps
+}
+
 func interpret(p program) {
 	memory := make([]uint8, memorySize)
-	pc := 0
 	dataptr := 0
 	reader := bufio.NewReader(os.Stdin)
 	ops := translate(p)
-	for pc < len(ops) {
+	for pc := 0; pc < len(ops); pc++ {
 		op := ops[pc]
 		switch op.kind {
 		case incPtr:
@@ -165,6 +215,20 @@ func interpret(p program) {
 				print(string(memory[dataptr]))
 			}
 			break
+		case loopSetToZero:
+			memory[dataptr] = 0
+			break
+		case loopMovePtr:
+			for memory[dataptr] != 0 {
+				dataptr += op.argument
+			}
+			break
+		case loopMoveData:
+			if memory[dataptr] != 0 {
+				memory[dataptr+op.argument] = memory[dataptr]
+				memory[dataptr] = 0
+			}
+			break
 		case jumpIfDataZero:
 			if memory[dataptr] == 0 {
 				pc = op.argument
@@ -178,7 +242,6 @@ func interpret(p program) {
 		default:
 			panic(fmt.Sprintf("bad char '%v' at pc=%d", op.toToken(), pc))
 		}
-		pc++
 	}
 }
 
