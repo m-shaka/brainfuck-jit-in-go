@@ -29,6 +29,29 @@ type bfOp struct {
 	argument int
 }
 
+func (op *bfOp) toToken() rune {
+	switch op.kind {
+	case incPtr:
+		return '>'
+	case decPtr:
+		return '<'
+	case incData:
+		return '+'
+	case decData:
+		return '-'
+	case readStdin:
+		return ','
+	case writeStdout:
+		return '.'
+	case jumpIfDataZero:
+		return '['
+	case jumpIfDataNotZero:
+		return ']'
+	default:
+		panic("invalid op")
+	}
+}
+
 type program struct {
 	instructions []rune
 }
@@ -110,81 +133,56 @@ func translate(p program) []bfOp {
 	return ops
 }
 
-func interpret(p program, jumptable []int) {
+func interpret(p program) {
 	memory := make([]uint8, memorySize)
 	pc := 0
 	dataptr := 0
 	reader := bufio.NewReader(os.Stdin)
-	for pc < len(p.instructions) {
-		instruction := p.instructions[pc]
-		switch instruction {
-		case '>':
-			dataptr++
+	ops := translate(p)
+	for pc < len(ops) {
+		op := ops[pc]
+		switch op.kind {
+		case incPtr:
+			dataptr += op.argument
 			break
-		case '<':
-			dataptr--
+		case decPtr:
+			dataptr -= op.argument
 			break
-		case '+':
-			memory[dataptr]++
+		case incData:
+			memory[dataptr] += uint8(op.argument)
 			break
-		case '-':
-			memory[dataptr]--
+		case decData:
+			memory[dataptr] -= uint8(op.argument)
 			break
-		case ',':
-			val, _ := reader.ReadByte()
-			memory[dataptr] = uint8(val)
-			break
-		case '.':
-			print(string(memory[dataptr]))
-			break
-		case '[':
-			if memory[dataptr] == 0 {
-				pc = jumptable[pc]
+		case readStdin:
+			for i := 0; i < op.argument; i++ {
+				val, _ := reader.ReadByte()
+				memory[dataptr] = uint8(val)
 			}
 			break
-		case ']':
+		case writeStdout:
+			for i := 0; i < op.argument; i++ {
+				print(string(memory[dataptr]))
+			}
+			break
+		case jumpIfDataZero:
+			if memory[dataptr] == 0 {
+				pc = op.argument
+			}
+			break
+		case jumpIfDataNotZero:
 			if memory[dataptr] != 0 {
-				pc = jumptable[pc]
+				pc = op.argument
 			}
 			break
 		default:
-			panic(fmt.Sprintf("bad char '%s' at pc=%d", string(instruction), pc))
+			panic(fmt.Sprintf("bad char '%v' at pc=%d", op.toToken(), pc))
 		}
 		pc++
 	}
-}
-
-func computeJumptable(p program) []int {
-	pc := 0
-	programSize := len(p.instructions)
-	jumptable := make([]int, programSize)
-	for pc < programSize {
-		instruction := p.instructions[pc]
-		if instruction == '[' {
-			bracketNesting := 1
-			seek := pc
-			for bracketNesting > 0 && seek-2 < programSize {
-				seek++
-				if p.instructions[seek] == ']' {
-					bracketNesting--
-				} else if p.instructions[seek] == '[' {
-					bracketNesting++
-				}
-			}
-			if bracketNesting <= 0 {
-				jumptable[pc] = seek
-				jumptable[seek] = pc
-			} else {
-				panic(fmt.Sprintf("unmatched '[' at pc=%d", pc))
-			}
-		}
-		pc++
-	}
-	return jumptable
 }
 
 func main() {
 	program := parse(os.Args[1])
-	jumptable := computeJumptable(program)
-	interpret(program, jumptable)
+	interpret(program)
 }
