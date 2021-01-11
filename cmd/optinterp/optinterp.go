@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/m-shaka/brainfuck-jit/internal/stack"
+	"github.com/m-shaka/brainfuck-jit/internal/util"
 	"os"
-	"strings"
 )
 
 const memorySize = 30000
@@ -61,36 +61,13 @@ func (op *bfOp) toToken() rune {
 	}
 }
 
-type program struct {
-	instructions []rune
-}
-
-func parse(filename string) program {
-	var insts []rune
-	tokens := "><+-.,[]"
-	fp, err := os.Open(filename)
-	if err != nil {
-		panic(err)
-	}
-	defer fp.Close()
-	scanner := bufio.NewScanner(fp)
-	for scanner.Scan() {
-		for _, c := range scanner.Text() {
-			if strings.Contains(tokens, string(c)) {
-				insts = append(insts, c)
-			}
-		}
-	}
-	return program{insts}
-}
-
-func translate(p program) []bfOp {
+func translate(p util.Program) []bfOp {
 	pc := 0
-	programSize := len(p.instructions)
+	programSize := len(p.Instructions)
 	loopStack := stack.NewStack()
 	var ops []bfOp
 	for pc < programSize {
-		instruction := p.instructions[pc]
+		instruction := p.Instructions[pc]
 		switch instruction {
 		case '[':
 			loopStack.Push(len(ops))
@@ -114,7 +91,7 @@ func translate(p program) []bfOp {
 		default:
 			start := pc
 			pc++
-			for pc < programSize && p.instructions[pc] == instruction {
+			for pc < programSize && p.Instructions[pc] == instruction {
 				pc++
 			}
 			numRepeats := pc - start
@@ -184,7 +161,7 @@ func optimizeLoop(ops []bfOp, loopStart int) []bfOp {
 	return optimizedOps
 }
 
-func interpret(p program) {
+func interpret(p util.Program) {
 	memory := make([]uint8, memorySize)
 	dataptr := 0
 	reader := bufio.NewReader(os.Stdin)
@@ -246,6 +223,6 @@ func interpret(p program) {
 }
 
 func main() {
-	program := parse(os.Args[1])
+	program := util.Parse(os.Args[1])
 	interpret(program)
 }
