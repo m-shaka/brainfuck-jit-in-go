@@ -188,11 +188,12 @@ func optimizeLoop(ops []bfOp, loopStart int) []bfOp {
 func compile(prog util.Program) []byte {
 	memory := make([]byte, memorySize)
 	p := (uintptr)(unsafe.Pointer(&memory[0]))
-	ops := translate(prog)
+	bracketStack := stack.NewStack()
 	var code machineCode
 	code.emitBytes(0x49, 0xBD)
 	code.emitU64(int(p))
 
+	ops := translate(prog)
 	for pc := 0; pc < len(ops); pc++ {
 		op := ops[pc]
 		switch op.kind {
@@ -261,14 +262,30 @@ func compile(prog util.Program) []byte {
 			// }
 			break
 		case jumpIfDataZero:
-			// if memory[dataptr] == 0 {
-			// 	pc = op.argument
-			// }
+			code.emitBytes(0x41, 0x80, 0x7d, 0x00, 0x00)
+			bracketStack.Push(len(code))
+			code.emitBytes(0x0F, 0x84)
+			code.emitU32(0) // offset。後で埋め直す
 			break
 		case jumpIfDataNotZero:
-			// if memory[dataptr] != 0 {
-			// 	pc = op.argument
-			// }
+			bracketOffset, err := bracketStack.Pop()
+			if err != nil {
+				panic("mismatch [")
+			}
+			// cmpb $0, 0(%r13)
+			code.emitBytes(0x41, 0x80, 0x7d, 0x00, 0x00)
+			jumpBackFrom := len(code) + 6
+			jumpBackTo := bracketOffset + 6
+			offsetBack := computeRelativeOffset(jumpBackFrom, jumpBackTo)
+			code.emitBytes(0x0F, 0x85)
+			code.emitU32(int(offsetBack))
+
+			jumpForwardFrom := jumpBackTo
+			jumpForwardTo := len(code)
+			offsetForward := computeRelativeOffset(jumpForwardFrom, jumpForwardTo)
+			for i := 2; i < 6; i++ {
+				code[bracketOffset+i] = byte((offsetForward >> ((i - 2) * 8)) & mask)
+			}
 			break
 		default:
 			panic(fmt.Sprintf("bad char '%v' at pc=%d", op.toToken(), pc))
@@ -276,6 +293,10 @@ func compile(prog util.Program) []byte {
 	}
 	code.emitBytes(0xC3)
 	return code
+}
+
+func computeRelativeOffset(from int, to int) uint32 {
+	return uint32(to - from)
 }
 
 func execute(m machineCode, debug bool) int {

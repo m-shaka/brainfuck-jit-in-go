@@ -41,11 +41,11 @@ func compile(prog util.Program) []byte {
 			machineCodes = append(machineCodes, 0x49, 0xFF, 0xCD)
 			break
 		case '+':
-			// addb$1, 0(%r13)
+			// addb $1, 0(%r13)
 			machineCodes = append(machineCodes, 0x41, 0x80, 0x45, 0x00, 0x01)
 			break
 		case '-':
-			// subb$1, 0(%r13)
+			// subb $1, 0(%r13)
 			machineCodes = append(machineCodes, 0x41, 0x80, 0x6D, 0x00, 0x01)
 			break
 		case '.':
