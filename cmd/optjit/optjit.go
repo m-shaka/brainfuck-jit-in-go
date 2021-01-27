@@ -198,20 +198,12 @@ func compile(prog util.Program) []byte {
 		op := ops[pc]
 		switch op.kind {
 		case incPtr:
-			if op.argument < 256 {
-				code.emitBytes(0x49, 0x83, 0xc5, byte(op.argument))
-			} else {
-				code.emitBytes(0x49, 0x81, 0xc5)
-				code.emitU32(op.argument)
-			}
+			code.emitBytes(0x49, 0x81, 0xc5)
+			code.emitU32(op.argument)
 			break
 		case decPtr:
-			if op.argument < 256 {
-				code.emitBytes(0x49, 0x83, 0xed, byte(op.argument))
-			} else {
-				code.emitBytes(0x49, 0x81, 0xed)
-				code.emitU32(op.argument)
-			}
+			code.emitBytes(0x49, 0x81, 0xed)
+			code.emitU32(op.argument)
 			break
 		case incData:
 			if op.argument < 256 {
@@ -251,15 +243,46 @@ func compile(prog util.Program) []byte {
 			code.emitBytes(0x41, 0xC6, 0x45, 0x00, 0x00)
 			break
 		case loopMovePtr:
-			// for memory[dataptr] != 0 {
-			// 	dataptr += op.argument
-			// }
+			code.emitBytes(
+				0x41, 0x80, 0x7d, 0x00, 0x00,
+				0x0F, 0x84,
+			)
+			code.emitU32(0x12)
+			if op.argument >= 0 {
+				code.emitBytes(0x49, 0x81, 0xc5)
+				code.emitU32(op.argument)
+			} else {
+				code.emitBytes(0x49, 0x81, 0xed)
+				code.emitU32(-op.argument)
+			}
+			code.emitBytes(
+				0x41, 0x80, 0x7d, 0x00, 0x00,
+				0x0f, 0x85,
+			)
+			code.emitU32(0xffffffee) // -17
 			break
 		case loopMoveData:
-			// if memory[dataptr] != 0 {
-			// 	memory[dataptr+op.argument] = memory[dataptr]
-			// 	memory[dataptr] = 0
-			// }
+			// skip if data is zero
+			code.emitBytes(
+				0x41, 0x80, 0x7d, 0x00, 0x00,
+				0x0F, 0x84,
+			)
+			code.emitU32(23)
+
+			// store r13 into r14 and shift r14
+			code.emitBytes(0x4d, 0x89, 0xee)
+			if op.argument >= 0 {
+				code.emitBytes(0x49, 0x81, 0xc6)
+				code.emitU32(op.argument)
+			} else {
+				code.emitBytes(0x49, 0x81, 0xee)
+				code.emitU32(-op.argument)
+			}
+			code.emitBytes(
+				0x49, 0x0f, 0xb6, 0x45, 0x0,
+				0x41, 0x00, 0x06,
+				0x41, 0xC6, 0x45, 0x00, 0x00,
+			)
 			break
 		case jumpIfDataZero:
 			code.emitBytes(0x41, 0x80, 0x7d, 0x00, 0x00)
